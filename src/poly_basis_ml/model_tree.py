@@ -21,9 +21,11 @@ class ChebyshevModelTreeRegressor(BaseEstimator, RegressorMixin):
     ----------
     max_depth : int, default=3
         Maximum depth of the routing tree.
-    min_samples_leaf : int, default=200
+    min_samples_leaf : int or float, default=200
         Minimum samples per leaf for fitting a polynomial model.
         Leaves with fewer samples fall back to tree prediction.
+        If int, the absolute minimum number of samples.
+        If float, a fraction of n_samples (consistent with sklearn).
     complexity : int, default=2
         Chebyshev polynomial degree for leaf models.
     alpha : float, default=10.0
@@ -69,11 +71,18 @@ class ChebyshevModelTreeRegressor(BaseEstimator, RegressorMixin):
         """
         X, y = check_X_y(X, y)
         self.n_features_in_ = X.shape[1]
+        n_samples = X.shape[0]
+
+        # Resolve min_samples_leaf: float means fraction of n_samples
+        if isinstance(self.min_samples_leaf, float):
+            min_leaf_abs = max(1, int(np.ceil(self.min_samples_leaf * n_samples)))
+        else:
+            min_leaf_abs = self.min_samples_leaf
 
         X_route = X[:, self.routing_features] if self.routing_features is not None else X
         X_leaf = X[:, self.leaf_features] if self.leaf_features is not None else X
 
-        # Fit routing tree
+        # Fit routing tree (sklearn handles int/float min_samples_leaf natively)
         self.tree_ = DecisionTreeRegressor(
             max_depth=self.max_depth,
             min_samples_leaf=self.min_samples_leaf,
@@ -86,7 +95,7 @@ class ChebyshevModelTreeRegressor(BaseEstimator, RegressorMixin):
         self.leaf_models_ = {}
         for leaf_id in np.unique(leaf_ids):
             mask = leaf_ids == leaf_id
-            if mask.sum() >= self.min_samples_leaf:
+            if mask.sum() >= min_leaf_abs:
                 self.leaf_models_[leaf_id] = ChebyshevRegressor(
                     complexity=self.complexity, alpha=self.alpha,
                 ).fit(X_leaf[mask], y[mask])
